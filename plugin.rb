@@ -2,7 +2,7 @@
 
 # name: discourse-telegram-chat-bridge
 # about: Real-time two-way bridge between Discourse Chat and Telegram, including Telegram forum topics
-# version: 0.0.1
+# version: 0.1.0
 # authors: babylai
 # url: https://github.com/babylai/discourse-telegram-chat-bridge
 
@@ -22,6 +22,16 @@ after_initialize do
   require_relative "lib/discourse_telegram_chat_bridge/relay"
   require_relative "lib/discourse_telegram_chat_bridge/markdown_formatter"
   require_relative "lib/discourse_telegram_chat_bridge/webhook_handler"
+  require_relative "lib/discourse_telegram_chat_bridge/rate_limit_retry"
+
+  DiscourseTelegramChatBridge::Mapping.log_summary if SiteSetting.telegram_bridge_enabled
+
+  on(:site_setting_changed) do |name, _old_value, _new_value|
+    if %i[telegram_bridge_mappings telegram_bridge_enabled].include?(name.to_sym) &&
+         SiteSetting.telegram_bridge_enabled
+      DiscourseTelegramChatBridge::Mapping.log_summary
+    end
+  end
 
   on(:chat_message_created) do |message, _channel, _user|
     next if !SiteSetting.telegram_bridge_enabled?

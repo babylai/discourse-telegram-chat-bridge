@@ -16,6 +16,9 @@ module DiscourseTelegramChatBridge
     # getFile refuses files over 20 MB.
     TELEGRAM_DOWNLOAD_LIMIT = 20.megabytes
 
+    # `/id` (optionally `/id@BotName`) as its own first word.
+    ID_COMMAND = %r{\A/id(?:@\w+)?(?:\s|\z)}
+
     def self.handle_update(update)
       new(update).handle_update
     end
@@ -38,6 +41,11 @@ module DiscourseTelegramChatBridge
       return if message.dig("from", "is_bot")
 
       body = message["text"].presence || message["caption"]
+
+      # Setup helper: replies with the ids needed for a mapping row. Works
+      # in unmapped chats/topics on purpose - that's when you need it.
+      return handle_id_command(message) if body.present? && body.match?(ID_COMMAND)
+
       media = extract_media(message)
       return if body.blank? && media.nil?
 
@@ -122,6 +130,22 @@ module DiscourseTelegramChatBridge
           "[discourse-telegram-chat-bridge] failed to relay edit for telegram_message_id=#{message["message_id"]}: #{result.inspect_steps}",
         )
       end
+    end
+
+    def handle_id_command(message)
+      chat_id = message["chat"]["id"]
+      thread_id = message["message_thread_id"]
+
+      lines = ["chat_id: <code>#{chat_id}</code>"]
+      lines << "message_thread_id: <code>#{thread_id}</code>" if thread_id
+      mapping_line = ["{discourse_chat_channel_id}", chat_id, thread_id].compact.join(":")
+      lines << "Mapping line: <code>#{mapping_line}</code>"
+
+      TelegramClient.new.send_message(
+        chat_id: chat_id,
+        message_thread_id: thread_id,
+        text: lines.join("\n"),
+      )
     end
 
     def build_raw(message, body:, notes: [])

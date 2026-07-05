@@ -15,6 +15,18 @@ module DiscourseTelegramChatBridge
       end
     end
 
+    # HTTP 429 - Telegram tells us exactly how long to wait (~20
+    # messages/min per group). Jobs re-enqueue after retry_after instead
+    # of failing into Sidekiq's generic retry schedule.
+    class RateLimitedError < ApiError
+      attr_reader :retry_after
+
+      def initialize(description:, retry_after:)
+        @retry_after = retry_after
+        super(error_code: 429, description: description)
+      end
+    end
+
     BASE_URL = "https://api.telegram.org"
 
     def initialize(bot_token: SiteSetting.telegram_bridge_bot_token)
@@ -106,11 +118,15 @@ module DiscourseTelegramChatBridge
       connection = Faraday.new { |f| f.adapter FinalDestination::FaradayAdapter }
       response = connection.get("#{BASE_URL}/file/bot#{@bot_token}/#{file_path}")
 
-      if response.status != 200
-        raise ApiError.new(error_code: response.status, description: "file download failed")
+      return response.body if response.status == 200
+
+      begin
+        parse_response(response) # raises Rate/ApiError from the JSON error body
+      rescue JSON::ParserError
+        nil
       end
 
-      response.body
+      raise ApiError.new(error_code: response.status, description: "file download failed")
     end
 
     def set_webhook(url:, secret_token:)
@@ -160,11 +176,16 @@ module DiscourseTelegramChatBridge
     def parse_response(response)
       body = JSON.parse(response.body)
 
-      if !body["ok"]
-        raise ApiError.new(error_code: body["error_code"], description: body["description"])
+      return body["result"] if body["ok"]
+
+      if body["error_code"] == 429
+        raise RateLimitedError.new(
+          description: body["description"],
+          retry_after: (body.dig("parameters", "retry_after") || 30).to_i.clamp(1, 3600),
+        )
       end
 
-      body["result"]
+      raise ApiError.new(error_code: body["error_code"], description: body["description"])
     end
 
     def file_part(io, filename)

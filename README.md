@@ -7,10 +7,11 @@ See [DESIGN.md](DESIGN.md) for the full design, scope, and milestone plan.
 
 ## Status
 
-M0–M4 done: two-way text bridging with replies, edits both ways,
-Discourse→Telegram deletion, and media both ways (photos, albums,
-documents, with graceful degradation for oversized files). Hardening
-(M5: rate-limit backoff, `/id` command, boot log) is next.
+Feature-complete for the POC (M0–M5): two-way text bridging with
+replies, edits both ways, Discourse→Telegram deletion, media both ways
+(photos, albums, documents, with graceful degradation for oversized
+files), rate-limit backoff, an `/id` setup command, and a boot log of
+active mappings.
 
 ## How it works
 
@@ -32,6 +33,19 @@ no deletion event. Deletions sync Discourse→Telegram only.
 | `telegram_bridge_bot_token` | Telegram Bot API token from [@BotFather](https://t.me/BotFather). |
 | `telegram_bridge_webhook_secret` | Secret validated against Telegram's `X-Telegram-Bot-Api-Secret-Token` header. |
 | `telegram_bridge_mappings` | One line per bridged channel: `chat_channel_id:telegram_chat_id:telegram_thread_id` (thread id optional). |
+
+### Finding the ids: the `/id` command
+
+Type `/id` in any group or topic the bot can see (mapped or not). The bot
+replies with the `chat_id`, the `message_thread_id` (in a topic), and a
+ready-to-paste mapping line — fill in the Discourse chat channel id.
+
+### Rate limits
+
+Telegram allows roughly 20 messages/minute per group. When the bridge is
+told to slow down (HTTP 429), the job re-enqueues itself after the wait
+Telegram asked for, up to 5 attempts per message. All bridge jobs are
+idempotent, so retries never duplicate messages.
 
 ### Telegram bot setup
 

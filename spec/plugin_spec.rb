@@ -9,6 +9,15 @@ describe Plugin::Instance do
 
   before { SiteSetting.telegram_bridge_mappings = "#{channel.id}:-1001111111111" }
 
+  it "logs the mapping summary when the mappings setting changes while enabled" do
+    SiteSetting.telegram_bridge_enabled = true
+    allow(Rails.logger).to receive(:info)
+
+    SiteSetting.telegram_bridge_mappings = "#{channel.id}:-1009999999999:7"
+
+    expect(Rails.logger).to have_received(:info).with(/active mappings:.*-1009999999999 thread 7/)
+  end
+
   it "enqueues a relay job when a chat message is created in a mapped channel, if enabled" do
     SiteSetting.telegram_bridge_enabled = true
 

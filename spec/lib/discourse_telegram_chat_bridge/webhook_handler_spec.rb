@@ -167,6 +167,60 @@ describe DiscourseTelegramChatBridge::WebhookHandler do
     end
   end
 
+  describe ".handle_update with the /id command" do
+    def stub_bot_reply
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendMessage\z}).to_return(
+        status: 200,
+        body: { ok: true, result: { message_id: 900 } }.to_json,
+      )
+    end
+
+    it "replies with chat and thread ids without bridging the command" do
+      stub =
+        stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendMessage\z}).with(
+          body:
+            hash_including(
+              "chat_id" => -1_001_111_111_111,
+              "message_thread_id" => 42,
+              "text" => /chat_id: <code>-1001111111111<\/code>.*message_thread_id: <code>42<\/code>.*Mapping line/m,
+            ),
+        ).to_return(status: 200, body: { ok: true, result: { message_id: 900 } }.to_json)
+
+      expect { described_class.handle_update(build_update(text: "/id")) }.not_to change {
+        Chat::Message.count
+      }
+
+      expect(stub).to have_been_requested.once
+    end
+
+    it "works in an unmapped chat - that's when you need it" do
+      SiteSetting.telegram_bridge_mappings = ""
+      stub = stub_bot_reply
+
+      described_class.handle_update(build_update(text: "/id"))
+
+      expect(stub).to have_been_requested.once
+    end
+
+    it "accepts the /id@BotName form" do
+      stub = stub_bot_reply
+
+      described_class.handle_update(build_update(text: "/id@SomeBridgeBot"))
+
+      expect(stub).to have_been_requested.once
+    end
+
+    it "does not treat words merely starting with /id as the command" do
+      stub = stub_bot_reply
+
+      expect { described_class.handle_update(build_update(text: "/ideas anyone?")) }.to change {
+        Chat::Message.count
+      }.by(1)
+
+      expect(stub).not_to have_been_requested
+    end
+  end
+
   describe ".handle_update with media" do
     def build_media_update(message_id: 700, caption: nil, **media_fields)
       {

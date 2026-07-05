@@ -62,6 +62,29 @@ describe DiscourseTelegramChatBridge::Mapping do
     end
   end
 
+  describe ".log_summary" do
+    before { allow(Rails.logger).to receive(:info) }
+
+    it "logs one line summarizing all active mappings" do
+      SiteSetting.telegram_bridge_mappings = "5:-1001111111111:42|7:-1002222222222"
+
+      described_class.log_summary
+
+      expect(Rails.logger).to have_received(:info).with(
+        "[discourse-telegram-chat-bridge] active mappings: " \
+          "channel 5 <-> chat -1001111111111 thread 42; channel 7 <-> chat -1002222222222",
+      )
+    end
+
+    it "logs explicitly when nothing is mapped" do
+      SiteSetting.telegram_bridge_mappings = ""
+
+      described_class.log_summary
+
+      expect(Rails.logger).to have_received(:info).with(/no active mappings/)
+    end
+  end
+
   describe ".for_channel" do
     it "finds the entry for a given chat channel id" do
       SiteSetting.telegram_bridge_mappings = "5:-1001111111111:42|7:-1002222222222"

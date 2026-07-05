@@ -49,6 +49,25 @@ module DiscourseTelegramChatBridge
       end
     end
 
+    # Safety net against a misconfigured row (e.g. an NSFW channel mapped
+    # into the SFW group): one greppable line summarizing what is bridged,
+    # emitted at boot and whenever the mapping setting changes.
+    def self.log_summary
+      summary =
+        if entries.empty?
+          "no active mappings"
+        else
+          entries
+            .map do |e|
+              thread = e.telegram_thread_id ? " thread #{e.telegram_thread_id}" : ""
+              "channel #{e.chat_channel_id} <-> chat #{e.telegram_chat_id}#{thread}"
+            end
+            .join("; ")
+        end
+
+      Rails.logger.info("[discourse-telegram-chat-bridge] active mappings: #{summary}")
+    end
+
     def self.parse!(line)
       fields = line.split(":").map(&:strip)
 

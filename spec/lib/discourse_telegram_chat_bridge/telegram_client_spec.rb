@@ -49,6 +49,24 @@ describe DiscourseTelegramChatBridge::TelegramClient do
       expect(stub).to have_been_requested
     end
 
+    it "raises RateLimitedError with Telegram's retry_after on HTTP 429" do
+      stub_request(:post, "https://api.telegram.org/bottest-token/sendMessage").to_return(
+        status: 429,
+        body: {
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests: retry after 7",
+          parameters: {
+            retry_after: 7,
+          },
+        }.to_json,
+      )
+
+      expect { client.send_message(chat_id: -100, text: "hi") }.to raise_error(
+        DiscourseTelegramChatBridge::TelegramClient::RateLimitedError,
+      ) { |error| expect(error.retry_after).to eq(7) }
+    end
+
     it "raises ApiError when Telegram responds with ok: false" do
       stub_request(:post, "https://api.telegram.org/bottest-token/sendMessage").to_return(
         status: 400,
@@ -181,6 +199,24 @@ describe DiscourseTelegramChatBridge::TelegramClient do
       expect { client.download_file("photos/f.jpg") }.to raise_error(
         DiscourseTelegramChatBridge::TelegramClient::ApiError,
       )
+    end
+
+    it "raises RateLimitedError when the file endpoint returns 429" do
+      stub_request(:get, "https://api.telegram.org/file/bottest-token/photos/f.jpg").to_return(
+        status: 429,
+        body: {
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests: retry after 3",
+          parameters: {
+            retry_after: 3,
+          },
+        }.to_json,
+      )
+
+      expect { client.download_file("photos/f.jpg") }.to raise_error(
+        DiscourseTelegramChatBridge::TelegramClient::RateLimitedError,
+      ) { |error| expect(error.retry_after).to eq(3) }
     end
   end
 

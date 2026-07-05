@@ -239,7 +239,7 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 | M2 ✅ | T→D text | Webhook route, secret validation, ChatSDK, entities→markdown | A Telegram message lands in the channel as `**Name:** text` in real time — **live-verified 2026-07-05** with a real `setWebhook` against the test site |
 | M3 ✅ | Replies, edits, deletion (D→T) | Full use of the mapping table | Edit/delete/reply reflected correctly — **live-verified both directions 2026-07-05**. Gotcha: `allowed_updates` is baked into the setWebhook registration, so adding `edited_message` in code required re-running setWebhook |
 | M4 ✅ | Media | Images/files both ways, albums, size limits | Photos both ways; oversized files degrade gracefully — 99 specs green; **live-verified both directions 2026-07-05** (photo D→T, photo+caption T→D, reply-with-image D→T, caption edit T→D) |
-| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against both supergroups in production |
+| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against both supergroups in production — hardening built and verified 2026-07-05 (112 specs); production deploy pending |
 
 Testing: RSpec on renderer/mapping with WebMock against the Bot API; manual
 E2E in dev via polling mode. Dev gotcha: changes to `plugin.rb`/Ruby require

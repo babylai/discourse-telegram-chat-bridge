@@ -2,6 +2,8 @@
 
 module Jobs
   class TelegramBridgeRelayMessage < ::Jobs::Base
+    prepend ::DiscourseTelegramChatBridge::RateLimitRetry
+
     def execute(args)
       return if !SiteSetting.telegram_bridge_enabled?
 
