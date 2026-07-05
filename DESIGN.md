@@ -13,7 +13,7 @@ Beslutninger truffet 2026-07-05:
 | Topologi | **2 Telegram-supergrupper** (én SFW, én NSFW) med Topics slået til. Discourse-chatkanaler mappes manuelt til (gruppe, topic)-par via en konfigurationsliste. |
 | Arkitektur | **Eget Discourse-plugin** — ingen ekstern service. |
 | Identitet T→D | **Én bot-bruger** i Discourse; Telegram-beskeder postes som `**Maria:** tekst`. |
-| Identitet D→T | Telegram-botten poster med `**nicolai:** tekst` (bots kan ikke udgive sig for brugere). |
+| Identitet D→T | Telegram-botten poster med `nicolai:` som **rigtig fed tekst** via Telegrams `parse_mode: HTML` (`<b>nicolai:</b> tekst`), ikke bogstavelige markdown-stjerner (bots kan ikke udgive sig for brugere). |
 | Omfang | Tekst begge veje, **redigeringer begge veje**, **sletninger kun D→T** (Bot API har ingen sletnings-event), **billeder/filer begge veje**, **replies/citater begge veje**. |
 | Første leverance | POC der bridger admin-kanalerne til ét topic i hver supergruppe. |
 
@@ -225,8 +225,8 @@ Praktisk POC-hjælper: botten svarer på kommandoen `/id` i et topic med
 
 | # | Milepæl | Indhold | Acceptkriterium |
 |---|---|---|---|
-| M0 | Skelet | Plugin-skeleton, settings, mapping-parser, botbruger, migration | Plugin booter i dev uden fejl |
-| M1 | D→T tekst | Event-hooks, Sidekiq-job, Telegram-klient (Faraday), mapping-skrivning | Besked i admin-kanal dukker op i rette topic |
+| M0 ✅ | Skelet | Plugin-skeleton, settings, mapping-parser, botbruger, migration | Plugin booter i dev uden fejl — verificeret 2026-07-05 på testforum.ageplay.dk |
+| M1 ✅ | D→T tekst | Event-hooks, Sidekiq-job, Telegram-klient (Faraday), mapping-skrivning | Besked i admin-kanal dukker op i rette topic — kode+specs verificeret 2026-07-05; live smoke-test afventer rigtig bot-token + Telegram chat/thread-id'er |
 | M2 | T→D tekst | Webhook-route + dev-polling, secret-validering, ChatSDK, entities→markdown | Telegram-besked lander i kanalen som `**Navn:** tekst` i realtid |
 | M3 | Replies, redigeringer, sletning (D→T) | Fuld brug af mapping-tabellen | Redigér/slet/svar afspejles korrekt |
 | M4 | Medier | Billeder/filer begge veje, albums, størrelsesgrænser | Foto begge veje; fil > 20 MB giver pæn fallback |
