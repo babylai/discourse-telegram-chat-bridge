@@ -31,6 +31,18 @@ module DiscourseTelegramChatBridge
       )
     end
 
+    def set_webhook(url:, secret_token:)
+      call("setWebhook", url: url, secret_token: secret_token, allowed_updates: %w[message])
+    end
+
+    def delete_webhook
+      call("deleteWebhook")
+    end
+
+    def get_webhook_info
+      call("getWebhookInfo")
+    end
+
     private
 
     def call(method, **params)

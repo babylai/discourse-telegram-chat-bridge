@@ -65,4 +65,32 @@ describe DiscourseTelegramChatBridge::TelegramClient do
       )
     end
   end
+
+  describe "#set_webhook" do
+    it "posts the url and secret_token to Telegram's setWebhook endpoint" do
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/setWebhook").with(
+          body:
+            hash_including(
+              "url" => "https://example.com/telegram-bridge/webhook",
+              "secret_token" => "shh",
+            ),
+        ).to_return(status: 200, body: { ok: true, result: true }.to_json)
+
+      client.set_webhook(url: "https://example.com/telegram-bridge/webhook", secret_token: "shh")
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe "#get_webhook_info" do
+    it "returns the parsed webhook info" do
+      stub_request(:post, "https://api.telegram.org/bottest-token/getWebhookInfo").to_return(
+        status: 200,
+        body: { ok: true, result: { url: "https://example.com/hook" } }.to_json,
+      )
+
+      expect(client.get_webhook_info["url"]).to eq("https://example.com/hook")
+    end
+  end
 end
