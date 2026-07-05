@@ -26,6 +26,11 @@ module DiscourseTelegramChatBridge
       new(cooked, prefix: prefix).format
     end
 
+    # The bare `<b>name:</b>` author prefix, e.g. for media captions.
+    def self.prefix_html(prefix)
+      "<b>#{CGI.escapeHTML(prefix.to_s)}:</b>"
+    end
+
     def initialize(cooked, prefix:)
       @cooked = cooked.to_s
       @prefix = prefix

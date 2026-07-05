@@ -93,6 +93,97 @@ describe DiscourseTelegramChatBridge::TelegramClient do
     end
   end
 
+  describe "#send_photo" do
+    it "posts multipart form data to sendPhoto" do
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/sendPhoto").with(
+          headers: {
+            "Content-Type" => %r{\Amultipart/form-data},
+          },
+        ).to_return(status: 200, body: { ok: true, result: { message_id: 42 } }.to_json)
+
+      result =
+        client.send_photo(chat_id: -100, io: StringIO.new("bytes"), filename: "pic.png")
+
+      expect(result["message_id"]).to eq(42)
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe "#send_document" do
+    it "posts multipart form data to sendDocument" do
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/sendDocument").with(
+          headers: {
+            "Content-Type" => %r{\Amultipart/form-data},
+          },
+        ).to_return(status: 200, body: { ok: true, result: { message_id: 43 } }.to_json)
+
+      client.send_document(chat_id: -100, io: StringIO.new("bytes"), filename: "doc.pdf")
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe "#send_media_group" do
+    it "posts multipart form data and returns the message array" do
+      # WebMock can't match multipart bodies, so this only asserts the call.
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/sendMediaGroup").with(
+          headers: {
+            "Content-Type" => %r{\Amultipart/form-data},
+          },
+        ).to_return(
+          status: 200,
+          body: { ok: true, result: [{ message_id: 61 }, { message_id: 62 }] }.to_json,
+        )
+
+      result =
+        client.send_media_group(
+          chat_id: -100,
+          entries: [
+            { io: StringIO.new("a"), filename: "a.png", caption: "<b>maria:</b>" },
+            { io: StringIO.new("b"), filename: "b.png" },
+          ],
+        )
+
+      expect(result.map { |m| m["message_id"] }).to eq([61, 62])
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe "#get_file" do
+    it "returns the file info" do
+      stub_request(:post, "https://api.telegram.org/bottest-token/getFile").with(
+        body: hash_including("file_id" => "abc"),
+      ).to_return(status: 200, body: { ok: true, result: { file_path: "photos/f.jpg" } }.to_json)
+
+      expect(client.get_file(file_id: "abc")["file_path"]).to eq("photos/f.jpg")
+    end
+  end
+
+  describe "#download_file" do
+    it "fetches the file bytes from the file endpoint" do
+      stub_request(:get, "https://api.telegram.org/file/bottest-token/photos/f.jpg").to_return(
+        status: 200,
+        body: "bytes",
+      )
+
+      expect(client.download_file("photos/f.jpg")).to eq("bytes")
+    end
+
+    it "raises ApiError on a non-200 response" do
+      stub_request(:get, "https://api.telegram.org/file/bottest-token/photos/f.jpg").to_return(
+        status: 404,
+        body: "not found",
+      )
+
+      expect { client.download_file("photos/f.jpg") }.to raise_error(
+        DiscourseTelegramChatBridge::TelegramClient::ApiError,
+      )
+    end
+  end
+
   describe "#set_webhook" do
     it "posts the url and secret_token to Telegram's setWebhook endpoint" do
       stub =

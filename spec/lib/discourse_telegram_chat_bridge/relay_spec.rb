@@ -117,6 +117,134 @@ describe DiscourseTelegramChatBridge::Relay do
     end
   end
 
+  describe ".relay_to_telegram with attachments" do
+    def create_image_upload(fixture: "logo.png")
+      UploadCreator.new(file_from_fixtures(fixture, "images"), fixture).create_for(author.id)
+    end
+
+    def stub_send_photo(message_id: 601)
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendPhoto\z}).to_return(
+        status: 200,
+        body: { ok: true, result: { message_id: message_id } }.to_json,
+      )
+    end
+
+    it "sends a lone image as a captioned photo and records a media row" do
+      upload = create_image_upload
+      media_message =
+        Fabricate(
+          :chat_message,
+          chat_channel: channel,
+          user: author,
+          message: "",
+          upload_ids: [upload.id],
+        )
+      photo_stub = stub_send_photo
+      text_stub = stub_send_message
+
+      described_class.relay_to_telegram(media_message)
+
+      expect(photo_stub).to have_been_requested
+      expect(text_stub).not_to have_been_requested
+
+      row = TelegramBridgedMessage.find_by(chat_message_id: media_message.id)
+      expect(row.media_attachment).to eq(true)
+      expect(row.ordinal).to eq(0)
+    end
+
+    it "sends text first, then the photo without a caption" do
+      upload = create_image_upload
+      media_message =
+        Fabricate(
+          :chat_message,
+          chat_channel: channel,
+          user: author,
+          message: "look at this",
+          upload_ids: [upload.id],
+        )
+      text_stub = stub_send_message(message_id: 600)
+      photo_stub = stub_send_photo(message_id: 601)
+
+      described_class.relay_to_telegram(media_message)
+
+      expect(text_stub).to have_been_requested
+      expect(photo_stub).to have_been_requested
+
+      rows = TelegramBridgedMessage.where(chat_message_id: media_message.id).order(:ordinal)
+      expect(rows.map(&:ordinal)).to eq([0, 1])
+      expect(rows.map(&:media_attachment)).to eq([false, true])
+    end
+
+    it "sends multiple images as one media group" do
+      # Two distinct fixtures - identical bytes would dedupe to one upload.
+      uploads = [create_image_upload, create_image_upload(fixture: "downsized.png")]
+      media_message =
+        Fabricate(
+          :chat_message,
+          chat_channel: channel,
+          user: author,
+          message: "",
+          upload_ids: uploads.map(&:id),
+        )
+      group_stub =
+        stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendMediaGroup\z}).to_return(
+          status: 200,
+          body: { ok: true, result: [{ message_id: 61 }, { message_id: 62 }] }.to_json,
+        )
+
+      described_class.relay_to_telegram(media_message)
+
+      expect(group_stub).to have_been_requested
+
+      rows = TelegramBridgedMessage.where(chat_message_id: media_message.id).order(:ordinal)
+      expect(rows.map(&:telegram_message_id)).to eq([61, 62])
+      expect(rows.map(&:media_attachment)).to eq([true, true])
+    end
+
+    it "routes images over the photo size limit through sendDocument" do
+      upload = create_image_upload
+      upload.update_columns(filesize: 11.megabytes)
+      media_message =
+        Fabricate(
+          :chat_message,
+          chat_channel: channel,
+          user: author,
+          message: "",
+          upload_ids: [upload.id],
+        )
+      document_stub =
+        stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendDocument\z}).to_return(
+          status: 200,
+          body: { ok: true, result: { message_id: 71 } }.to_json,
+        )
+
+      described_class.relay_to_telegram(media_message)
+
+      expect(document_stub).to have_been_requested
+    end
+
+    it "degrades files over the Bot API upload limit to an omission note" do
+      upload = create_image_upload
+      upload.update_columns(filesize: 60.megabytes)
+      media_message =
+        Fabricate(
+          :chat_message,
+          chat_channel: channel,
+          user: author,
+          message: "",
+          upload_ids: [upload.id],
+        )
+      text_stub =
+        stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/sendMessage\z}).with(
+          body: %r{file omitted},
+        ).to_return(status: 200, body: { ok: true, result: { message_id: 81 } }.to_json)
+
+      described_class.relay_to_telegram(media_message)
+
+      expect(text_stub).to have_been_requested
+    end
+  end
+
   describe ".relay_edit_to_telegram" do
     before do
       TelegramBridgedMessage.create!(
@@ -167,6 +295,29 @@ describe DiscourseTelegramChatBridge::Relay do
       )
 
       expect { described_class.relay_edit_to_telegram(message) }.not_to raise_error
+    end
+
+    it "does not touch attachment rows when editing the text (regression)" do
+      TelegramBridgedMessage.create!(
+        chat_message_id: message.id,
+        telegram_chat_id: -1_001_111_111_111,
+        telegram_message_id: 556,
+        direction: :discourse_to_telegram,
+        ordinal: 1,
+        media_attachment: true,
+      )
+
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/editMessageText\z}).to_return(
+        status: 200,
+        body: { ok: true, result: {} }.to_json,
+      )
+      delete_stub = stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/deleteMessage\z})
+
+      expect { described_class.relay_edit_to_telegram(message) }.not_to change {
+        TelegramBridgedMessage.count
+      }
+
+      expect(delete_stub).not_to have_been_requested
     end
 
     it "deletes stale trailing chunks when the edit shrinks the message" do

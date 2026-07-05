@@ -7,8 +7,10 @@ See [DESIGN.md](DESIGN.md) for the full design, scope, and milestone plan.
 
 ## Status
 
-M0–M3 done: two-way text bridging with replies, edits both ways, and
-Discourse→Telegram deletion. Media (M4) and hardening (M5) are next.
+M0–M4 done: two-way text bridging with replies, edits both ways,
+Discourse→Telegram deletion, and media both ways (photos, albums,
+documents, with graceful degradation for oversized files). Hardening
+(M5: rate-limit backoff, `/id` command, boot log) is next.
 
 ## How it works
 

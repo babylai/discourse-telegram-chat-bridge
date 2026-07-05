@@ -166,4 +166,135 @@ describe DiscourseTelegramChatBridge::WebhookHandler do
       expect { described_class.handle_update(build_update) }.not_to change { Chat::Message.count }
     end
   end
+
+  describe ".handle_update with media" do
+    def build_media_update(message_id: 700, caption: nil, **media_fields)
+      {
+        "update_id" => 3,
+        "message" => {
+          "message_id" => message_id,
+          "date" => Time.zone.now.to_i,
+          "chat" => {
+            "id" => -1_001_111_111_111,
+          },
+          "message_thread_id" => 42,
+          "caption" => caption,
+          "from" => {
+            "id" => 999,
+            "is_bot" => false,
+            "first_name" => "Maria",
+          },
+          **media_fields,
+        }.compact,
+      }
+    end
+
+    def stub_photo_download
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/getFile\z}).to_return(
+        status: 200,
+        body: { ok: true, result: { file_path: "photos/file_2.jpg" } }.to_json,
+      )
+      stub_request(:get, %r{\Ahttps://api\.telegram\.org/file/bot.*/photos/file_2\.jpg\z}).to_return(
+        status: 200,
+        body: file_from_fixtures("logo.png", "images").read,
+      )
+    end
+
+    let(:photo_field) do
+      {
+        "photo" => [
+          { "file_id" => "small", "file_unique_id" => "u1", "file_size" => 100 },
+          { "file_id" => "large", "file_unique_id" => "u2", "file_size" => 5000 },
+        ],
+      }
+    end
+
+    it "downloads a photo and attaches it to the created chat message" do
+      stub_photo_download
+
+      expect { described_class.handle_update(build_media_update(**photo_field)) }.to change {
+        Chat::Message.where(chat_channel_id: channel.id).count
+      }.by(1)
+
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.uploads.count).to eq(1)
+      expect(message.message).to eq("**Maria:**")
+    end
+
+    it "uses the caption (with entities) as the message text" do
+      stub_photo_download
+
+      described_class.handle_update(
+        build_media_update(
+          caption: "nice pic",
+          "caption_entities" => [{ "type" => "bold", "offset" => 0, "length" => 4 }],
+          **photo_field,
+        ),
+      )
+
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.message).to eq("**Maria:** **nice** pic")
+      expect(message.uploads.count).to eq(1)
+    end
+
+    it "degrades animated stickers to their emoji" do
+      described_class.handle_update(
+        build_media_update(
+          "sticker" => {
+            "file_id" => "s1",
+            "file_unique_id" => "su1",
+            "is_animated" => true,
+            "emoji" => "😀",
+          },
+        ),
+      )
+
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.message).to eq("**Maria:** 😀")
+      expect(message.uploads.count).to eq(0)
+    end
+
+    it "degrades files over the download limit to an omission note without calling getFile" do
+      get_file_stub = stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/getFile\z})
+
+      described_class.handle_update(
+        build_media_update(
+          "document" => {
+            "file_id" => "d1",
+            "file_unique_id" => "du1",
+            "file_name" => "big.bin",
+            "file_size" => 25.megabytes,
+          },
+        ),
+      )
+
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.message).to include("[file omitted: big.bin")
+      expect(get_file_stub).not_to have_been_requested
+    end
+
+    it "degrades to a note when Telegram refuses the download as too big" do
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/getFile\z}).to_return(
+        status: 400,
+        body: {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: file is too big",
+        }.to_json,
+      )
+
+      described_class.handle_update(
+        build_media_update(
+          "document" => {
+            "file_id" => "d1",
+            "file_unique_id" => "du1",
+            "file_name" => "big.bin",
+          },
+        ),
+      )
+
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.message).to include("[file omitted: big.bin")
+    end
+  end
 end
