@@ -29,6 +29,26 @@ after_initialize do
     Jobs.enqueue(:telegram_bridge_relay_message, chat_message_id: message.id)
   end
 
+  on(:chat_message_restored) do |message, _channel, _user|
+    next if !SiteSetting.telegram_bridge_enabled?
+
+    # A deleted Telegram message can't be un-deleted, so a restore is
+    # relayed the same way a brand new message would be.
+    Jobs.enqueue(:telegram_bridge_relay_message, chat_message_id: message.id)
+  end
+
+  on(:chat_message_edited) do |message, _channel, _user|
+    next if !SiteSetting.telegram_bridge_enabled?
+
+    Jobs.enqueue(:telegram_bridge_relay_edit, chat_message_id: message.id)
+  end
+
+  on(:chat_message_trashed) do |message, _channel, _user|
+    next if !SiteSetting.telegram_bridge_enabled?
+
+    Jobs.enqueue(:telegram_bridge_relay_deletion, chat_message_id: message.id)
+  end
+
   Discourse::Application.routes.append do
     post "/telegram-bridge/webhook" => "discourse_telegram_chat_bridge/webhook#create"
   end

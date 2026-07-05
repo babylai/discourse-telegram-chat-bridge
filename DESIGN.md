@@ -228,7 +228,7 @@ Praktisk POC-hjælper: botten svarer på kommandoen `/id` i et topic med
 | M0 ✅ | Skelet | Plugin-skeleton, settings, mapping-parser, botbruger, migration | Plugin booter i dev uden fejl — verificeret 2026-07-05 på testforum.ageplay.dk |
 | M1 ✅ | D→T tekst | Event-hooks, Sidekiq-job, Telegram-klient (Faraday), mapping-skrivning | Besked i admin-kanal dukker op i rette topic — **live-verificeret 2026-07-05**: staff-kanal → "APDK Crew"-supergruppen, topic "TestSyncDiscourse" |
 | M2 ✅ | T→D tekst | Webhook-route, secret-validering, ChatSDK, entities→markdown | Telegram-besked lander i kanalen som `**Navn:** tekst` i realtid — **live-verificeret 2026-07-05**: rigtig `setWebhook` mod testforum.ageplay.dk, beskeder fra "APDK Crew" landede korrekt i staff-kanalen |
-| M3 | Replies, redigeringer, sletning (D→T) | Fuld brug af mapping-tabellen | Redigér/slet/svar afspejles korrekt |
+| M3 | Replies, redigeringer, sletning (D→T) | Fuld brug af mapping-tabellen | Redigér/slet/svar afspejles korrekt — kode+77 specs grønne 2026-07-05; live smoke-test mangler |
 | M4 | Medier | Billeder/filer begge veje, albums, størrelsesgrænser | Foto begge veje; fil > 20 MB giver pæn fallback |
 | M5 | Hærdning + prod-POC | 429-backoff, `/id`-kommando, boot-log af mappings, README; fork + `ageplay.yml`-linje; rebuild | Admin-kanaler kører mod begge supergrupper i prod |
 

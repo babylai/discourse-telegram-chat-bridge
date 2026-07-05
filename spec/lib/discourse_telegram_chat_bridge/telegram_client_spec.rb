@@ -66,6 +66,33 @@ describe DiscourseTelegramChatBridge::TelegramClient do
     end
   end
 
+  describe "#edit_message_text" do
+    it "posts to Telegram's editMessageText endpoint" do
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/editMessageText").with(
+          body:
+            hash_including("chat_id" => -100, "message_id" => 42, "text" => "updated", "parse_mode" => "HTML"),
+        ).to_return(status: 200, body: { ok: true, result: {} }.to_json)
+
+      client.edit_message_text(chat_id: -100, message_id: 42, text: "updated")
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe "#delete_message" do
+    it "posts to Telegram's deleteMessage endpoint" do
+      stub =
+        stub_request(:post, "https://api.telegram.org/bottest-token/deleteMessage").with(
+          body: hash_including("chat_id" => -100, "message_id" => 42),
+        ).to_return(status: 200, body: { ok: true, result: true }.to_json)
+
+      client.delete_message(chat_id: -100, message_id: 42)
+
+      expect(stub).to have_been_requested
+    end
+  end
+
   describe "#set_webhook" do
     it "posts the url and secret_token to Telegram's setWebhook endpoint" do
       stub =

@@ -31,8 +31,28 @@ module DiscourseTelegramChatBridge
       )
     end
 
+    def edit_message_text(chat_id:, message_id:, text:)
+      call(
+        "editMessageText",
+        chat_id: chat_id,
+        message_id: message_id,
+        text: text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      )
+    end
+
+    def delete_message(chat_id:, message_id:)
+      call("deleteMessage", chat_id: chat_id, message_id: message_id)
+    end
+
     def set_webhook(url:, secret_token:)
-      call("setWebhook", url: url, secret_token: secret_token, allowed_updates: %w[message])
+      call(
+        "setWebhook",
+        url: url,
+        secret_token: secret_token,
+        allowed_updates: %w[message edited_message],
+      )
     end
 
     def delete_webhook
