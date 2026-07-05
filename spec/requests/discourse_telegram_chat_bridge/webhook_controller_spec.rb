@@ -42,6 +42,20 @@ describe DiscourseTelegramChatBridge::WebhookController do
     end
   end
 
+  context "with malformed JSON" do
+    it "returns 400 and does not enqueue a job" do
+      expect {
+        post "/telegram-bridge/webhook",
+             params: "{not json",
+             headers: {
+               "CONTENT_TYPE" => "text/plain",
+               "X-Telegram-Bot-Api-Secret-Token" => webhook_secret,
+             }
+      }.not_to change { Jobs::TelegramBridgeHandleUpdate.jobs.size }
+      expect(response.status).to eq(400)
+    end
+  end
+
   context "with the correct secret header" do
     it "returns 200 and enqueues the update for processing" do
       expect { post_update(secret_header: webhook_secret) }.to change {

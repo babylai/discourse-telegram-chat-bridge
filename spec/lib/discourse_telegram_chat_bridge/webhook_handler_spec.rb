@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 describe DiscourseTelegramChatBridge::WebhookHandler do
-  fab!(:channel) { Fabricate(:category_channel) }
+  fab!(:channel, :category_channel)
 
   before { SiteSetting.telegram_bridge_mappings = "#{channel.id}:-1001111111111:42" }
 
@@ -155,7 +155,15 @@ describe DiscourseTelegramChatBridge::WebhookHandler do
     end
 
     it "ignores edits for messages that were never bridged" do
-      expect { described_class.handle_update(build_edit_update) }.not_to change { Chat::Message.count }
+      expect { described_class.handle_update(build_edit_update) }.not_to change {
+        Chat::Message.count
+      }
+    end
+
+    it "does not create a duplicate when the same update is processed twice (redelivery)" do
+      described_class.handle_update(build_update)
+
+      expect { described_class.handle_update(build_update) }.not_to change { Chat::Message.count }
     end
   end
 end

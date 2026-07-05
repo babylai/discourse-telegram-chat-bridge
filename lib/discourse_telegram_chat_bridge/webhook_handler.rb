@@ -28,6 +28,13 @@ module DiscourseTelegramChatBridge
       return if message.dig("from", "is_bot")
       return if message["text"].blank?
 
+      # Sidekiq is at-least-once and Telegram redelivers unacknowledged
+      # updates - skip if this exact Telegram message was already bridged.
+      return if TelegramBridgedMessage.exists?(
+        telegram_chat_id: message["chat"]["id"],
+        telegram_message_id: message["message_id"],
+      )
+
       mapping = Mapping.for_telegram(message["chat"]["id"], message["message_thread_id"])
       return if mapping.nil?
 

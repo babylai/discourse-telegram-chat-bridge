@@ -12,7 +12,12 @@ module DiscourseTelegramChatBridge
       return head :forbidden if !valid_secret?
 
       request.body.rewind
-      update = JSON.parse(request.body.read)
+      begin
+        update = JSON.parse(request.body.read)
+      rescue JSON::ParserError
+        return head :bad_request
+      end
+
       Jobs.enqueue(:telegram_bridge_handle_update, update: update)
 
       head :ok

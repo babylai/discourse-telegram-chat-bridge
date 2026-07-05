@@ -1,246 +1,255 @@
 # Discourse Chat ↔ Telegram bridge — design & plan
 
-*Status: designfase, besluttet 2026-07-05. POC-mål: admin-grupperne.*
+*Status: in development. POC target: staff/admin channels.*
 
-## 1. Formål og besluttede rammer
+## 1. Purpose and decisions
 
-Realtids-tovejssynkronisering mellem Discourse Chat på ageplay.dk og Telegram.
+Real-time, two-way synchronization between Discourse Chat and Telegram.
 
-Beslutninger truffet 2026-07-05:
+Decisions made 2026-07-05:
 
-| Emne | Beslutning |
+| Topic | Decision |
 |---|---|
-| Topologi | **2 Telegram-supergrupper** (én SFW, én NSFW) med Topics slået til. Discourse-chatkanaler mappes manuelt til (gruppe, topic)-par via en konfigurationsliste. |
-| Arkitektur | **Eget Discourse-plugin** — ingen ekstern service. |
-| Identitet T→D | **Én bot-bruger** i Discourse; Telegram-beskeder postes som `**Maria:** tekst`. |
-| Identitet D→T | Telegram-botten poster med `nicolai:` som **rigtig fed tekst** via Telegrams `parse_mode: HTML` (`<b>nicolai:</b> tekst`), ikke bogstavelige markdown-stjerner (bots kan ikke udgive sig for brugere). |
-| Omfang | Tekst begge veje, **redigeringer begge veje**, **sletninger kun D→T** (Bot API har ingen sletnings-event), **billeder/filer begge veje**, **replies/citater begge veje**. |
-| Første leverance | POC der bridger admin-kanalerne til ét topic i hver supergruppe. |
+| Topology | **2 Telegram supergroups** (one SFW, one NSFW) with Topics enabled. Discourse chat channels are mapped manually to (group, topic) pairs via a configuration list. |
+| Architecture | **A dedicated Discourse plugin** — no external service. |
+| Identity T→D | **A single bot user** in Discourse; Telegram messages are posted as `**Maria:** text`. |
+| Identity D→T | The Telegram bot posts the author as **real bold text** via Telegram's `parse_mode: HTML` (`<b>nicolai:</b> text`), not literal markdown asterisks (bots cannot impersonate users). |
+| Scope | Text both ways, **edits both ways**, **deletions D→T only** (the Bot API has no deletion event), **images/files both ways**, **replies/quotes both ways**. |
+| First deliverable | A POC bridging the staff channels to one topic in each supergroup. |
 
-Arbejdsnavn for pluginet: **`discourse-telegram-chat-bridge`** (bemærk:
-`babylai/discourse-chat-bridge` er allerede optaget af en gammel, urørt fork
-af Lhcfl's plugin fra jan. 2025 — bruges ikke som base, jf. §2). Deployes i
-prod via `ageplay.yml` fra en fork under egen kontrol (babylai/DaVania-mønstret).
+Plugin name: **`discourse-telegram-chat-bridge`**. Deployed to production
+via a `git clone` line in the site's container config (`app.yml`), like any
+other Discourse plugin.
 
-## 2. Research-resumé
+## 2. Research summary
 
-### Discourse-siden (core, medio 2026)
+### The Discourse side (core, mid-2026)
 
-- Chat-pluginet er bundlet i core og udsender `DiscourseEvent`-hooks, som et
-  plugin kan abonnere på med `on(:event) { ... }` — **ingen monkey-patching**:
+- The chat plugin is bundled into core and fires `DiscourseEvent` hooks that
+  a plugin can subscribe to with `on(:event) { ... }` — **no monkey-patching**:
   - `:chat_message_created` (create_message.rb)
   - `:chat_message_edited` (update_message.rb)
   - `:chat_message_trashed` (trash_message.rb)
   - `:chat_message_restored` (restore_message.rb)
 - **`ChatSDK::Message.create(raw:, channel_id:, guardian:, in_reply_to_id:, upload_ids:, enforce_membership:)`**
-  er den semi-officielle API til at oprette chatbeskeder fra plugins (bruges af
-  discourse-ai). Redigering/sletning findes ikke i SDK'en — dér kaldes
-  service-objekterne direkte: `Chat::UpdateMessage.call(...)` /
-  `Chat::TrashMessage.call(...)` (samme indgange som controllerne bruger).
-- Core's *incoming chat webhooks* (`/chat/hooks/:key.json`) er for begrænsede
-  (kun `text`, 2000 tegn, fast identitet) — bruges ikke.
-- Det bundlede chat-integration-plugin sender kun *forumindlæg*, ikke chat —
-  ikke relevant.
+  is the semi-official API for creating chat messages from plugins (used by
+  discourse-ai). Editing/deletion don't exist in the SDK — for those the
+  service objects are called directly: `Chat::UpdateMessage.call(...)` /
+  `Chat::TrashMessage.call(...)` (the same entry points the controllers use).
+- Core's *incoming chat webhooks* (`/chat/hooks/:key.json`) are too limited
+  (only `text`, 2000 chars, fixed identity) — not used.
+- The bundled chat-integration plugin only relays *forum posts*, not chat —
+  not relevant.
 
-### Telegram-siden (Bot API)
+### The Telegram side (Bot API)
 
-- **Udgående:** `sendMessage`/`sendPhoto`/`sendDocument`/`sendMediaGroup`,
-  `editMessageText`/`editMessageCaption`, `deleteMessage`. Formatering via
-  `parse_mode: HTML` (lille tag-subset: b/i/u/s/a/code/pre/blockquote).
-- **Indgående:** webhook (`setWebhook` → HTTPS-endpoint, valideret med
-  `secret_token`, echoes i headeren `X-Telegram-Bot-Api-Secret-Token`) eller
-  `getUpdates` long-polling. Botten skal have **privacy mode slået fra** (via
-  BotFather) eller være gruppe-admin for at se alle beskeder.
-- **Topics:** I en supergruppe med Topics har hver besked et
-  `message_thread_id`; beskeder i "General" har intet. Man sender ind i et
-  topic ved at sætte `message_thread_id` på sendMessage. Botten kan oprette
-  topics (`createForumTopic`, kræver admin med `can_manage_topics`) — ikke
-  nødvendigt i POC, hvor mapping er manuel.
-- **Hårde begrænsninger:**
-  - Bots kan ikke sætte navn/avatar pr. besked → navnepræfiks-konvention.
-  - **Ingen event ved sletning** → sletninger kan ikke synkroniseres T→D.
-  - Bots modtager aldrig andre bots' (eller egne) beskeder → gratis
-    loop-beskyttelse på Telegram-siden.
-  - Rate limits: ~30 beskeder/s globalt, **~20 beskeder/min pr. gruppe**.
-  - Fil-download via `getFile` er begrænset til 20 MB.
+- **Outgoing:** `sendMessage`/`sendPhoto`/`sendDocument`/`sendMediaGroup`,
+  `editMessageText`/`editMessageCaption`, `deleteMessage`. Formatting via
+  `parse_mode: HTML` (small tag subset: b/i/u/s/a/code/pre/blockquote).
+- **Incoming:** webhook (`setWebhook` → HTTPS endpoint, validated via
+  `secret_token`, echoed in the `X-Telegram-Bot-Api-Secret-Token` header) or
+  `getUpdates` long-polling. The bot must have **privacy mode disabled** (via
+  BotFather) or be a group admin to see all messages. Note: a privacy-mode
+  change only takes effect for groups the bot is already in after the bot is
+  removed and re-added.
+- **Topics:** In a supergroup with Topics, every message carries a
+  `message_thread_id`; messages in "General" have none. Sending into a topic
+  means setting `message_thread_id` on sendMessage. The bot can create topics
+  (`createForumTopic`, requires admin with `can_manage_topics`) — not needed
+  in the POC, where the mapping is manual.
+- **Hard limitations:**
+  - Bots cannot set a per-message name/avatar → the name-prefix convention.
+  - **No deletion event** → deletions cannot be synced T→D.
+  - Bots never receive other bots' (or their own) messages → free loop
+    protection on the Telegram side.
+  - Rate limits: ~30 messages/s globally, **~20 messages/min per group**.
+  - File downloads via `getFile` are limited to 20 MB.
 
-### Eksisterende løsninger
+### Existing solutions
 
 - **[discourse-chat-bridge (Lhcfl)](https://meta.discourse.org/t/discourse-chat-bridge-telegram/284691)**
-  ([GitHub](https://github.com/Lhcfl/discourse-chat-bridge), MIT): tovejs,
-  billeder, replies, redigeringer — men sidste commit jan. 2025, bygger på
-  monkey-patching fra før ChatSDK modnede, kræver nyeste `tests-passed`, og
-  **ingen topics-support**. Bruges som kodereference (især
-  markdown↔Telegram-konvertering), ikke som base.
-- Kilder i øvrigt:
+  ([GitHub](https://github.com/Lhcfl/discourse-chat-bridge), MIT): two-way,
+  images, replies, edits — but last commit Jan 2025, built on monkey-patching
+  from before ChatSDK matured, requires the very latest `tests-passed`, and
+  **no topics support**. Used as a code reference (especially
+  markdown↔Telegram conversion), not as a base.
+- Other sources:
   [Telegram Bot API](https://core.telegram.org/bots/api),
   [create_message.rb](https://github.com/discourse/discourse/blob/main/plugins/chat/app/services/chat/create_message.rb),
   [ChatSDK](https://github.com/discourse/discourse/blob/main/plugins/chat/lib/chat_sdk/message.rb),
-  [chat webhook-dokumentation](https://meta.discourse.org/t/discourse-chat-webhook-documentation/258667),
-  [chat-integration-docs](https://github.com/discourse/discourse-developer-docs/blob/main/docs/04-plugins/09-chat-integration.md).
+  [chat webhook documentation](https://meta.discourse.org/t/discourse-chat-webhook-documentation/258667),
+  [chat-integration docs](https://github.com/discourse/discourse-developer-docs/blob/main/docs/04-plugins/09-chat-integration.md).
 
-## 3. Arkitektur
+## 3. Architecture
 
 ```
-Discourse (prod-container "ageplay")
+Discourse (production container)
 ┌─────────────────────────────────────────────┐
-│ discourse-telegram-bridge (plugin)          │
+│ discourse-telegram-chat-bridge (plugin)     │
 │                                             │
-│ UDGÅENDE                                    │
+│ OUTGOING                                    │
 │  on(:chat_message_created/edited/trashed/   │
 │     restored)                               │
-│    └→ filtrér på mapping + skip bot-bruger  │
-│    └→ Sidekiq-job ──HTTP──→ Telegram Bot API│
+│    └→ filter on mapping + skip bot user     │
+│    └→ Sidekiq job ──HTTP──→ Telegram Bot API│
 │                                             │
-│ INDGÅENDE                                   │
+│ INCOMING                                    │
 │  POST /telegram-bridge/webhook  ←── Telegram│
-│    └→ valider secret_token                  │
-│    └→ slå (chat_id, thread_id) op i mapping │
-│    └→ Sidekiq-job → ChatSDK::Message.create │
+│    └→ validate secret_token                 │
+│    └→ look up (chat_id, thread_id) mapping  │
+│    └→ Sidekiq job → ChatSDK::Message.create │
 │                     / Chat::UpdateMessage   │
 │                                             │
-│ DB: telegram_bridged_messages (id-mapping)  │
+│ DB: telegram_bridged_messages (id mapping)  │
 └─────────────────────────────────────────────┘
 ```
 
-Alt Telegram-I/O sker i Sidekiq-jobs (aldrig i request-cyklussen), med retry og
-`retry_after`-respekt ved HTTP 429.
+All Telegram I/O happens in Sidekiq jobs (never in the request cycle), with
+retries and respect for `retry_after` on HTTP 429.
 
-### Konfiguration (site settings, POC)
+### Configuration (site settings, POC)
 
-| Setting | Type | Indhold |
+| Setting | Type | Contents |
 |---|---|---|
-| `telegram_bridge_enabled` | bool | master-switch |
-| `telegram_bridge_bot_token` | secret | én bot, medlem+admin i begge supergrupper |
-| `telegram_bridge_webhook_secret` | secret | valideres mod Telegram-headeren |
-| `telegram_bridge_mappings` | list | rækker af `chat_channel_id:telegram_chat_id:telegram_thread_id` — tom thread-id = General/almindelig gruppe |
+| `telegram_bridge_enabled` | bool | master switch |
+| `telegram_bridge_bot_token` | secret | one bot, member + admin in both supergroups |
+| `telegram_bridge_webhook_secret` | secret | validated against the Telegram header |
+| `telegram_bridge_mappings` | list | rows of `chat_channel_id:telegram_chat_id:telegram_thread_id` — empty thread id = General/plain group |
 
-**Rettelse fra M0-implementeringen:** feltseparatoren i hver mapping-linje er
-`:`, ikke `\|`. Discourses egen `type: list`-lagring joiner selve linjerne
-med `\|` (bekræftet i `site_setting_extension.rb`/`type_supervisor.rb`), så
-`\|` internt i en linje ville kollidere med det.
+**Correction from the M0 implementation:** the field separator within each
+mapping row is `:`, not `\|`. Discourse's own `type: list` storage joins the
+rows themselves with `\|` (confirmed in
+`site_setting_extension.rb`/`type_supervisor.rb`), so a `\|` inside a row
+would collide with it.
 
-SFW/NSFW-adskillelsen ligger alene i mapping-rækkerne (to forskellige
-`telegram_chat_id`). Pluginet opretter en dedikeret Discourse-botbruger
-(`telegram_bridge_bot_user_id`, brugernavn `telegram_bridge*`) på behov —
-ikke for hver boot, jf. `discourse-ai`s tilsvarende mønster for sin
-spam-scanner-bot — og sikrer medlemskab af de mappede kanaler via
+The SFW/NSFW separation lives entirely in the mapping rows (two different
+`telegram_chat_id`s). The plugin creates a dedicated Discourse bot user
+(`telegram_bridge_bot_user_id`, username `telegram_bridge*`) on demand —
+not on every boot, mirroring discourse-ai's pattern for its spam-scanner
+user — and ensures membership of the mapped channels via
 `Chat::ChannelMembershipManager`.
 
-### Datamodel
+### Data model
 
-Migration: tabel `telegram_bridged_messages`
+Migration: table `telegram_bridged_messages`
 
-| kolonne | type | note |
+| column | type | note |
 |---|---|---|
-| `chat_message_id` | bigint, indexed | Discourse-besked |
-| `telegram_chat_id` | bigint | supergruppe |
-| `telegram_message_id` | bigint | unik sammen med chat_id |
+| `chat_message_id` | bigint, indexed | Discourse message |
+| `telegram_chat_id` | bigint | supergroup |
+| `telegram_message_id` | bigint | unique together with chat_id |
 | `direction` | smallint | 0 = D→T, 1 = T→D |
-| `ordinal` | smallint | én D-besked kan blive flere T-beskeder (albums, >4096 tegn) |
+| `ordinal` | smallint | one Discourse message can become several Telegram messages (albums, >4096 chars) |
 
-Tabellen driver replies (slå modpartens id op), redigeringer og sletninger.
+This table drives replies (look up the counterpart id), edits and deletions.
 
-### Loop-beskyttelse
+### Loop protection
 
-- T→D-beskeder oprettes af `@telegram_bridge`-brugeren → udgående hooks
-  ignorerer alle beskeder fra den bruger i mappede kanaler.
-- Telegram sender aldrig botten dens egne beskeder → ingen loop den vej.
+- T→D messages are created by the `telegram_bridge` user → outgoing hooks
+  ignore all messages from that user in mapped channels.
+- Telegram never delivers the bot its own messages → no loop that way.
 
 ## 4. Flows
 
 ### Discourse → Telegram
 
-1. Hook affyres, kanal slås op i mapping (ellers ignorér), bot-bruger skippes.
-2. Job renderer: `**{username}:** ` + `cooked`-HTML konverteret til
-   Telegram-HTML-subset (mentions → `@navn` som tekst, uunderstøttede tags
-   strippes, > 4096 tegn splittes i flere beskeder).
-3. Uploads: billeder → `sendPhoto`/`sendMediaGroup`, andet → `sendDocument`.
-   **Filerne uploades som bytes** (download fra Discourse-storen først) — URL'er
-   duer ikke, da sitet er login-beskyttet.
-4. Reply: `message.in_reply_to_id` → slå Telegram-id op → `reply_to_message_id`.
-5. `message_thread_id` sættes fra mappingen. Resultatets id'er gemmes i
-   mapping-tabellen.
-6. Redigering → `editMessageText`/`editMessageCaption` på ordinal 0.
-   Sletning → `deleteMessage` (alle ordinaler). Gendannelse → send på ny
-   (Telegram kan ikke un-delete) og opdater mappingen.
+1. Hook fires, channel is looked up in the mapping (otherwise ignore), the
+   bot user is skipped.
+2. The job renders: `**{username}:** ` + `cooked` HTML converted to the
+   Telegram HTML subset (mentions → `@name` as plain text, unsupported tags
+   stripped, > 4096 chars split into multiple messages).
+3. Uploads: images → `sendPhoto`/`sendMediaGroup`, everything else →
+   `sendDocument`. **Files are uploaded as bytes** (downloaded from the
+   Discourse store first) — URLs won't do, since the site may be
+   login-protected.
+4. Reply: `message.in_reply_to_id` → look up the Telegram id →
+   `reply_to_message_id`.
+5. `message_thread_id` comes from the mapping. The resulting ids are stored
+   in the mapping table.
+6. Edit → `editMessageText`/`editMessageCaption` on ordinal 0. Deletion →
+   `deleteMessage` (all ordinals). Restore → send anew (Telegram cannot
+   un-delete) and update the mapping.
 
 ### Telegram → Discourse
 
-1. Webhook-request valideres (secret-header), svar 200 med det samme,
-   payload lægges i Sidekiq-job.
-2. `(chat.id, message_thread_id || nil)` slås op i mapping — ukendt topic
-   logges og ignoreres. Service-beskeder (joins, topic-events) ignoreres.
-3. Afsendernavn = `first_name last_name` (fallback `@username`). Telegram
-   *entities* (bold/italic/link/code) konverteres til markdown.
+1. The webhook request is validated (secret header), 200 is returned
+   immediately, the payload is put on a Sidekiq job.
+2. `(chat.id, message_thread_id || nil)` is looked up in the mapping — an
+   unknown topic is logged and ignored. Service messages (joins, topic
+   events) are ignored.
+3. Sender name = `first_name last_name` (fallback `@username`). Telegram
+   *entities* (bold/italic/link/code) are converted to markdown.
 4. `ChatSDK::Message.create(raw: "**Maria:** …", channel_id:, guardian: bot,
-   in_reply_to_id: <mappet id>, upload_ids:, enforce_membership: true)`.
-5. Medier: `getFile` → download (≤ 20 MB) → `UploadCreator` → `upload_ids`.
-   Stickers: statisk webp sendes som billede; animeret `.tgs` → emoji-fallback.
-   For store filer → besked med "[fil udeladt, {størrelse}]".
-6. `edited_message`-update → slå op i mapping → `Chat::UpdateMessage`.
-   (Sletning T→D er umulig — dokumenteret begrænsning.)
+   in_reply_to_id: <mapped id>, upload_ids:, enforce_membership: true)`.
+5. Media: `getFile` → download (≤ 20 MB) → `UploadCreator` → `upload_ids`.
+   Stickers: static webp is sent as an image; animated `.tgs` → emoji
+   fallback. Oversized files → a message with "[file omitted, {size}]".
+6. An `edited_message` update → look up the mapping → `Chat::UpdateMessage`.
+   (Deletion T→D is impossible — documented limitation.)
 
-### Topics — sådan passer de ind
+### Topics — how they fit
 
-Telegram-topics er varige "rum" i én supergruppe og matcher derfor
-**Discourse-chatkanaler 1:1** — det er den bærende idé i mappingen. De matcher
-bevidst *ikke* Discourse-chattråde (som er flygtige og opstår pr. besked); i
-POC'en bridges trådsvar fladt som reply på trådens rodbesked.
+Telegram topics are long-lived "rooms" inside one supergroup and therefore
+map to **Discourse chat channels 1:1** — that's the core idea of the
+mapping. They deliberately do *not* map to Discourse chat threads (which are
+ephemeral and created per message); in the POC, thread replies are bridged
+flat as a reply to the thread's root message.
 
-Praktisk POC-hjælper: botten svarer på kommandoen `/id` i et topic med
-`chat_id` + `message_thread_id`, så mapping-rækker er lette at slå op.
+Practical POC helper: the bot replies to the `/id` command in a topic with
+the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 
-## 5. Kanttilfælde og kendte begrænsninger
+## 5. Edge cases and known limitations
 
-- **Sletning i Telegram** når ikke Discourse (ingen Bot API-event). Accepteret.
-- **Redigeringsvindue:** Telegram tillader kun redigering af bot-beskeder i
-  48 timer; ældre D-redigeringer får en "(redigeret: …)"-følgebesked eller
-  ignoreres (POC: ignorér + log).
-- **Reaktioner** er ude af scope (kan tilføjes senere; Bot API ≥ 7.0
-  understøtter reaction-updates).
-- **Rate limits:** burst i en travl kanal kan ramme 20/min pr. gruppe →
-  jobs backer af på 429 og bevarer rækkefølge pr. kanal (Sidekiq-kø pr.
-  mapping eller sekventiel genkørsel).
-- **Formatteringstab** begge veje (tabeller, spoilers, onebox m.m.) — degradér
-  pænt til tekst/link.
-- **Webhook i dev:** dev-miljøet har ingen offentlig HTTPS → hidden setting
-  skifter til `getUpdates`-polling (rake-task `telegram_bridge:poll`), så E2E
-  kan testes lokalt i `discourse_dev`.
+- **Deletion in Telegram** never reaches Discourse (no Bot API event).
+  Accepted.
+- **Edit window:** Telegram only allows editing bot messages for 48 hours;
+  older Discourse edits get an "(edited: …)" follow-up message or are
+  ignored (POC: ignore + log).
+- **Reactions** are out of scope (can be added later; Bot API ≥ 7.0 supports
+  reaction updates).
+- **Rate limits:** a burst in a busy channel can hit 20/min per group → jobs
+  back off on 429 and preserve per-channel ordering (a Sidekiq queue per
+  mapping, or sequential retry).
+- **Formatting loss** both ways (tables, spoilers, oneboxes etc.) — degrade
+  gracefully to text/links.
+- **Webhook in dev:** the dev environment has no public HTTPS → a hidden
+  setting switches to `getUpdates` polling (rake task
+  `telegram_bridge:poll`) so E2E can be tested locally.
 
-## 6. Sikkerhed og privatliv
+## 6. Security and privacy
 
-- Webhook afviser requests uden korrekt `X-Telegram-Bot-Api-Secret-Token`.
-- Bot-token ligger som secret site setting i DB — **ikke** i `ageplay.yml`.
-- Kun eksplicit mappede kanaler bridges. Største reelle risiko er en
-  **fejlkonfigureret mapping-række** (NSFW-kanal → SFW-gruppe); mitigering:
-  få rækker, gennemgang ved ændring, og log-linje ved boot der opsummerer
-  aktive mappings.
-- Indholdet forlader det login-beskyttede forum og lagres hos Telegram —
-  det er selve formålet, men bør nævnes for medlemmerne af de bridgede kanaler.
-- Uploads bridges som bytes; der lækkes ingen interne URL'er der alligevel
-  kræver login.
+- The webhook rejects requests without the correct
+  `X-Telegram-Bot-Api-Secret-Token`.
+- The bot token lives as a secret site setting in the DB — **not** in the
+  container config.
+- Only explicitly mapped channels are bridged. The biggest real risk is a
+  **misconfigured mapping row** (NSFW channel → SFW group); mitigation: few
+  rows, review on change, and a boot log line summarizing active mappings.
+- Content leaves the login-protected forum and is stored with Telegram —
+  that is the whole point, but members of bridged channels should be told.
+- Uploads are bridged as bytes; no internal URLs (which would require login
+  anyway) are leaked.
 
-## 7. POC-plan (milepæle)
+## 7. POC plan (milestones)
 
-| # | Milepæl | Indhold | Acceptkriterium |
+| # | Milestone | Contents | Acceptance criterion |
 |---|---|---|---|
-| M0 ✅ | Skelet | Plugin-skeleton, settings, mapping-parser, botbruger, migration | Plugin booter i dev uden fejl — verificeret 2026-07-05 på testforum.ageplay.dk |
-| M1 ✅ | D→T tekst | Event-hooks, Sidekiq-job, Telegram-klient (Faraday), mapping-skrivning | Besked i admin-kanal dukker op i rette topic — **live-verificeret 2026-07-05**: staff-kanal → "APDK Crew"-supergruppen, topic "TestSyncDiscourse" |
-| M2 ✅ | T→D tekst | Webhook-route, secret-validering, ChatSDK, entities→markdown | Telegram-besked lander i kanalen som `**Navn:** tekst` i realtid — **live-verificeret 2026-07-05**: rigtig `setWebhook` mod testforum.ageplay.dk, beskeder fra "APDK Crew" landede korrekt i staff-kanalen |
-| M3 | Replies, redigeringer, sletning (D→T) | Fuld brug af mapping-tabellen | Redigér/slet/svar afspejles korrekt — kode+77 specs grønne 2026-07-05; live smoke-test mangler |
-| M4 | Medier | Billeder/filer begge veje, albums, størrelsesgrænser | Foto begge veje; fil > 20 MB giver pæn fallback |
-| M5 | Hærdning + prod-POC | 429-backoff, `/id`-kommando, boot-log af mappings, README; fork + `ageplay.yml`-linje; rebuild | Admin-kanaler kører mod begge supergrupper i prod |
+| M0 ✅ | Skeleton | Plugin skeleton, settings, mapping parser, bot user, migration | Plugin boots in dev without errors — verified 2026-07-05 on the test site |
+| M1 ✅ | D→T text | Event hooks, Sidekiq job, Telegram client (Faraday), mapping writes | A message in a mapped channel shows up in the right topic — **live-verified 2026-07-05** against a real supergroup topic |
+| M2 ✅ | T→D text | Webhook route, secret validation, ChatSDK, entities→markdown | A Telegram message lands in the channel as `**Name:** text` in real time — **live-verified 2026-07-05** with a real `setWebhook` against the test site |
+| M3 ✅ | Replies, edits, deletion (D→T) | Full use of the mapping table | Edit/delete/reply reflected correctly — 77 specs green; D→T reply/edit/delete **live-verified 2026-07-05**; T→D reply/edit live check pending |
+| M4 | Media | Images/files both ways, albums, size limits | Photos both ways; files > 20 MB degrade gracefully |
+| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against both supergroups in production |
 
-Test: RSpec på renderer/mapping med WebMock mod Bot API; manuel E2E i dev via
-polling-mode. Husk dev-gotcha: ændringer i `plugin.rb`/ruby kræver fuld
-Rails-genstart.
+Testing: RSpec on renderer/mapping with WebMock against the Bot API; manual
+E2E in dev via polling mode. Dev gotcha: changes to `plugin.rb`/Ruby require
+a full Rails restart.
 
-## 8. Risici
+## 8. Risks
 
-| Risiko | Sandsynlighed | Mitigering |
+| Risk | Likelihood | Mitigation |
 |---|---|---|
-| Core ændrer chat-events/SDK-signaturer | Middel | Lille kodeflade; kun officielle hooks; `.discourse-compatibility`; fork-mønstret gør hotfix let |
-| Rate limits ved travle kanaler | Middel | Backoff + kø pr. kanal; POC er lavtrafik (admin) |
-| Formatteringsfidelitet ædet af kanttilfælde | Høj (men lav skade) | Degradér til ren tekst; udbyg konverteren iterativt |
-| Fejlmapping SFW/NSFW | Lav | Boot-log + manuel gennemgang |
+| Core changes chat events/SDK signatures | Medium | Small code surface; only official hooks; `.discourse-compatibility`; plugin lives in its own repo so hotfixes are easy |
+| Rate limits in busy channels | Medium | Backoff + per-channel queue; the POC is low-traffic (staff) |
+| Formatting fidelity eaten by edge cases | High (but low harm) | Degrade to plain text; grow the converter iteratively |
+| SFW/NSFW mapping mistake | Low | Boot log + manual review |

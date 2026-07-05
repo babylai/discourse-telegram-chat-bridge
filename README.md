@@ -7,9 +7,20 @@ See [DESIGN.md](DESIGN.md) for the full design, scope, and milestone plan.
 
 ## Status
 
-M0 (skeleton) — plugin loads, site settings and channel-mapping storage
-exist, and a dedicated Discourse bot user can be created and joined to
-channels. No message bridging yet.
+M0–M3 done: two-way text bridging with replies, edits both ways, and
+Discourse→Telegram deletion. Media (M4) and hardening (M5) are next.
+
+## How it works
+
+Each Discourse chat channel is mapped to a Telegram chat — either a plain
+group, or a specific topic in a supergroup with Topics enabled
+(`message_thread_id`). Outgoing messages are picked up via Discourse's chat
+events and sent through the Telegram Bot API; incoming messages arrive on a
+secret-validated webhook and are posted by a dedicated bot user as
+`**Name:** text`.
+
+Telegram deletions are **not** synced into Discourse: the Bot API provides
+no deletion event. Deletions sync Discourse→Telegram only.
 
 ## Configuration
 
@@ -20,12 +31,25 @@ channels. No message bridging yet.
 | `telegram_bridge_webhook_secret` | Secret validated against Telegram's `X-Telegram-Bot-Api-Secret-Token` header. |
 | `telegram_bridge_mappings` | One line per bridged channel: `chat_channel_id:telegram_chat_id:telegram_thread_id` (thread id optional). |
 
+### Telegram bot setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
+2. **Disable privacy mode** (`/setprivacy` → Disable), or the bot only sees
+   `/commands`. If the bot is already in the group, remove and re-add it —
+   the change doesn't apply to existing memberships otherwise.
+3. Add the bot to the group as an **admin** (it needs `can_delete_messages`
+   for deletion sync, and admin also bypasses privacy mode).
+4. Register the webhook:
+   `POST https://api.telegram.org/bot<token>/setWebhook` with
+   `url=https://<your-site>/telegram-bridge/webhook`,
+   `secret_token=<telegram_bridge_webhook_secret>` and
+   `allowed_updates=["message","edited_message"]`.
+
 ## Development
 
-This plugin lives in its own repo and is loaded into a local Discourse
-checkout via a symlink under `plugins/`, same as the other ageplay.dk
-plugins. A full Rails restart (`bin/ember-cli -u`) is required after any
-Ruby change — the dev file watcher only covers JS/HBS/SCSS.
+Clone into your Discourse checkout's `plugins/` directory. A full Rails
+restart is required after any Ruby change — the dev file watcher only
+covers JS/HBS/SCSS.
 
 ```
 bin/rspec plugins/discourse-telegram-chat-bridge/spec

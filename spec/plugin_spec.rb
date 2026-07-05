@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
-describe "DiscourseTelegramChatBridge plugin hooks" do
-  fab!(:channel) { Fabricate(:category_channel) }
-  fab!(:user) { Fabricate(:user) }
+# Covers the DiscourseEvent hook wiring in plugin.rb (same convention as
+# e.g. discourse-akismet's plugin_spec).
+describe Plugin::Instance do
+  fab!(:channel, :category_channel)
+  fab!(:user)
   fab!(:admin)
 
   before { SiteSetting.telegram_bridge_mappings = "#{channel.id}:-1001111111111" }

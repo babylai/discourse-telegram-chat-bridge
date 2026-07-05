@@ -6,7 +6,15 @@ module DiscourseTelegramChatBridge
   # trashed message is handled by re-running relay_to_telegram, since a
   # deleted Telegram message can't be un-deleted - it just sends fresh
   # (see DESIGN.md). Media follows in M4.
+  #
+  # All entry points are idempotent: Sidekiq is at-least-once, so a job may
+  # run twice after a mid-run crash, and must not produce duplicates.
   class Relay
+    # Telegram error descriptions that mean "the work is already done" -
+    # retrying can never succeed, so they are swallowed rather than raised.
+    ALREADY_SATISFIED_ERRORS =
+      /message is not modified|message to edit not found|message to delete not found/i
+
     def self.relay_to_telegram(message)
       new(message).relay_to_telegram
     end
@@ -31,8 +39,15 @@ module DiscourseTelegramChatBridge
 
       texts = TelegramFormatter.format(@message.cooked, prefix: @message.user.username)
       client = TelegramClient.new
+      already_sent_ordinals =
+        TelegramBridgedMessage.where(
+          chat_message_id: @message.id,
+          direction: :discourse_to_telegram,
+        ).pluck(:ordinal)
 
       texts.each_with_index do |text, ordinal|
+        next if already_sent_ordinals.include?(ordinal)
+
         result =
           client.send_message(
             chat_id: mapping.telegram_chat_id,
@@ -71,11 +86,13 @@ module DiscourseTelegramChatBridge
         existing = bridged[ordinal]
 
         if existing
-          client.edit_message_text(
-            chat_id: mapping.telegram_chat_id,
-            message_id: existing.telegram_message_id,
-            text: text,
-          )
+          swallow_already_satisfied do
+            client.edit_message_text(
+              chat_id: mapping.telegram_chat_id,
+              message_id: existing.telegram_message_id,
+              text: text,
+            )
+          end
         else
           # The edit grew the message past its original number of Telegram
           # chunks - send the extra chunk(s) as new messages.
@@ -101,7 +118,12 @@ module DiscourseTelegramChatBridge
       bridged
         .select { |bridge_row| bridge_row.ordinal >= texts.size }
         .each do |stale|
-          client.delete_message(chat_id: mapping.telegram_chat_id, message_id: stale.telegram_message_id)
+          swallow_already_satisfied do
+            client.delete_message(
+              chat_id: mapping.telegram_chat_id,
+              message_id: stale.telegram_message_id,
+            )
+          end
           stale.destroy!
         end
     end
@@ -116,15 +138,23 @@ module DiscourseTelegramChatBridge
       client = TelegramClient.new
 
       bridged.each do |bridge_row|
-        client.delete_message(
-          chat_id: bridge_row.telegram_chat_id,
-          message_id: bridge_row.telegram_message_id,
-        )
+        swallow_already_satisfied do
+          client.delete_message(
+            chat_id: bridge_row.telegram_chat_id,
+            message_id: bridge_row.telegram_message_id,
+          )
+        end
         bridge_row.destroy!
       end
     end
 
     private
+
+    def swallow_already_satisfied
+      yield
+    rescue TelegramClient::ApiError => e
+      raise if !e.description.to_s.match?(ALREADY_SATISFIED_ERRORS)
+    end
 
     def reply_target_message_id(mapping)
       return nil if @message.in_reply_to_id.nil?

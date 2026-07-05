@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 describe DiscourseTelegramChatBridge::Relay do
-  fab!(:channel) { Fabricate(:category_channel) }
+  fab!(:channel, :category_channel)
   fab!(:author) { Fabricate(:user, username: "maria") }
   fab!(:message) do
     Fabricate(:chat_message, chat_channel: channel, user: author, message: "hello world")
@@ -68,6 +68,23 @@ describe DiscourseTelegramChatBridge::Relay do
       stub = stub_send_message
 
       described_class.relay_to_telegram(bot_message)
+
+      expect(stub).not_to have_been_requested
+    end
+
+    it "does not send again when the message was already bridged (job retry idempotency)" do
+      TelegramBridgedMessage.create!(
+        chat_message_id: message.id,
+        telegram_chat_id: -1_001_111_111_111,
+        telegram_message_id: 555,
+        direction: :discourse_to_telegram,
+        ordinal: 0,
+      )
+      stub = stub_send_message
+
+      expect { described_class.relay_to_telegram(message) }.not_to change {
+        TelegramBridgedMessage.count
+      }
 
       expect(stub).not_to have_been_requested
     end
@@ -139,6 +156,19 @@ describe DiscourseTelegramChatBridge::Relay do
       expect(stub).not_to have_been_requested
     end
 
+    it "swallows Telegram's 'message is not modified' error instead of failing the job" do
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/editMessageText\z}).to_return(
+        status: 400,
+        body: {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: message is not modified",
+        }.to_json,
+      )
+
+      expect { described_class.relay_edit_to_telegram(message) }.not_to raise_error
+    end
+
     it "deletes stale trailing chunks when the edit shrinks the message" do
       TelegramBridgedMessage.create!(
         chat_message_id: message.id,
@@ -197,6 +227,29 @@ describe DiscourseTelegramChatBridge::Relay do
       described_class.relay_deletion_to_telegram(message)
 
       expect(stub).not_to have_been_requested
+    end
+
+    it "still cleans up the mapping row when the Telegram message is already gone" do
+      TelegramBridgedMessage.create!(
+        chat_message_id: message.id,
+        telegram_chat_id: -1_001_111_111_111,
+        telegram_message_id: 555,
+        direction: :discourse_to_telegram,
+        ordinal: 0,
+      )
+
+      stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/deleteMessage\z}).to_return(
+        status: 400,
+        body: {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: message to delete not found",
+        }.to_json,
+      )
+
+      expect { described_class.relay_deletion_to_telegram(message) }.to change {
+        TelegramBridgedMessage.count
+      }.by(-1)
     end
   end
 end
