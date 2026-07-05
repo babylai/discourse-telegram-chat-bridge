@@ -113,11 +113,19 @@ Alt Telegram-I/O sker i Sidekiq-jobs (aldrig i request-cyklussen), med retry og
 | `telegram_bridge_enabled` | bool | master-switch |
 | `telegram_bridge_bot_token` | secret | én bot, medlem+admin i begge supergrupper |
 | `telegram_bridge_webhook_secret` | secret | valideres mod Telegram-headeren |
-| `telegram_bridge_mappings` | list | rækker af `chat_channel_id\|telegram_chat_id\|message_thread_id` — tom thread-id = General/almindelig gruppe |
+| `telegram_bridge_mappings` | list | rækker af `chat_channel_id:telegram_chat_id:telegram_thread_id` — tom thread-id = General/almindelig gruppe |
+
+**Rettelse fra M0-implementeringen:** feltseparatoren i hver mapping-linje er
+`:`, ikke `\|`. Discourses egen `type: list`-lagring joiner selve linjerne
+med `\|` (bekræftet i `site_setting_extension.rb`/`type_supervisor.rb`), så
+`\|` internt i en linje ville kollidere med det.
 
 SFW/NSFW-adskillelsen ligger alene i mapping-rækkerne (to forskellige
-`telegram_chat_id`). Pluginet opretter ved boot en dedikeret Discourse-botbruger
-(`@telegram_bridge`) og sikrer medlemskab af de mappede kanaler.
+`telegram_chat_id`). Pluginet opretter en dedikeret Discourse-botbruger
+(`telegram_bridge_bot_user_id`, brugernavn `telegram_bridge*`) på behov —
+ikke for hver boot, jf. `discourse-ai`s tilsvarende mønster for sin
+spam-scanner-bot — og sikrer medlemskab af de mappede kanaler via
+`Chat::ChannelMembershipManager`.
 
 ### Datamodel
 

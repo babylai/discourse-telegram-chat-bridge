@@ -1,0 +1,21 @@
+discourse_telegram_chat_bridge:
+  telegram_bridge_enabled:
+    client: false
+    default: false
+  telegram_bridge_bot_token:
+    client: false
+    default: ""
+    secret: true
+  telegram_bridge_webhook_secret:
+    client: false
+    default: ""
+    secret: true
+  telegram_bridge_mappings:
+    client: false
+    default: ""
+    type: list
+    list_type: simple
+  telegram_bridge_bot_user_id:
+    client: false
+    default: ""
+    hidden: true

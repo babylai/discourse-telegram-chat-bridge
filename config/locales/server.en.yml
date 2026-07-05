@@ -1,0 +1,7 @@
+en:
+  site_settings:
+    telegram_bridge_enabled: "Enable the Discourse Chat <-> Telegram bridge."
+    telegram_bridge_bot_token: "Telegram Bot API token, issued by @BotFather."
+    telegram_bridge_webhook_secret: "Secret token validated against Telegram's X-Telegram-Bot-Api-Secret-Token header on incoming webhook requests."
+    telegram_bridge_mappings: "Channel mappings, one per line: chat_channel_id:telegram_chat_id:telegram_thread_id (telegram_thread_id may be left blank for a group without Topics)."
+    telegram_bridge_bot_user_id: "Internal: id of the Discourse user that Telegram-origin messages are posted as. Managed automatically."
