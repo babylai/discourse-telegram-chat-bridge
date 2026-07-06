@@ -10,12 +10,12 @@ Decisions made 2026-07-05:
 
 | Topic | Decision |
 |---|---|
-| Topology | **2 Telegram supergroups** (one SFW, one NSFW) with Topics enabled. Discourse chat channels are mapped manually to (group, topic) pairs via a configuration list. |
+| Topology | **One or more Telegram supergroups** with Topics enabled. Discourse chat channels are mapped manually to (group, topic) pairs via a configuration list. |
 | Architecture | **A dedicated Discourse plugin** — no external service. |
 | Identity T→D | **A single bot user** in Discourse; Telegram messages are posted as `**Maria:** text`. |
 | Identity D→T | The Telegram bot posts the author as **real bold text** via Telegram's `parse_mode: HTML` (`<b>nicolai:</b> text`), not literal markdown asterisks (bots cannot impersonate users). |
 | Scope | Text both ways, **edits both ways**, **deletions D→T only** (the Bot API has no deletion event), **images/files both ways**, **replies/quotes both ways**. |
-| First deliverable | A POC bridging the staff channels to one topic in each supergroup. |
+| First deliverable | A POC bridging the staff channels to Telegram topics. |
 
 Plugin name: **`discourse-telegram-chat-bridge`**. Deployed to production
 via a `git clone` line in the site's container config (`app.yml`), like any
@@ -112,7 +112,7 @@ retries and respect for `retry_after` on HTTP 429.
 | Setting | Type | Contents |
 |---|---|---|
 | `telegram_bridge_enabled` | bool | master switch |
-| `telegram_bridge_bot_token` | secret | one bot, member + admin in both supergroups |
+| `telegram_bridge_bot_token` | secret | one bot, member + admin in all bridged groups |
 | `telegram_bridge_webhook_secret` | secret | validated against the Telegram header |
 | `telegram_bridge_mappings` | list | rows of `chat_channel_id:telegram_chat_id:telegram_thread_id` — empty thread id = General/plain group |
 
@@ -122,8 +122,8 @@ rows themselves with `\|` (confirmed in
 `site_setting_extension.rb`/`type_supervisor.rb`), so a `\|` inside a row
 would collide with it.
 
-The SFW/NSFW separation lives entirely in the mapping rows (two different
-`telegram_chat_id`s). The plugin creates a dedicated Discourse bot user
+Separation of channels across multiple groups lives entirely in the
+mapping rows (different `telegram_chat_id`s). The plugin creates a dedicated Discourse bot user
 (`telegram_bridge_bot_user_id`, username `telegram_bridge*`) on demand —
 not on every boot, mirroring discourse-ai's pattern for its spam-scanner
 user — and ensures membership of the mapped channels via
@@ -223,8 +223,9 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 - The bot token lives as a secret site setting in the DB — **not** in the
   container config.
 - Only explicitly mapped channels are bridged. The biggest real risk is a
-  **misconfigured mapping row** (NSFW channel → SFW group); mitigation: few
-  rows, review on change, and a boot log line summarizing active mappings.
+  **misconfigured mapping row** (a private channel bridged into the wrong
+  group); mitigation: few rows, review on change, and a boot log line
+  summarizing active mappings.
 - Content leaves the login-protected forum and is stored with Telegram —
   that is the whole point, but members of bridged channels should be told.
 - Uploads are bridged as bytes; no internal URLs (which would require login
@@ -239,7 +240,7 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 | M2 ✅ | T→D text | Webhook route, secret validation, ChatSDK, entities→markdown | A Telegram message lands in the channel as `**Name:** text` in real time — **live-verified 2026-07-05** with a real `setWebhook` against the test site |
 | M3 ✅ | Replies, edits, deletion (D→T) | Full use of the mapping table | Edit/delete/reply reflected correctly — **live-verified both directions 2026-07-05**. Gotcha: `allowed_updates` is baked into the setWebhook registration, so adding `edited_message` in code required re-running setWebhook |
 | M4 ✅ | Media | Images/files both ways, albums, size limits | Photos both ways; oversized files degrade gracefully — 99 specs green; **live-verified both directions 2026-07-05** (photo D→T, photo+caption T→D, reply-with-image D→T, caption edit T→D) |
-| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against both supergroups in production — hardening built and verified 2026-07-05 (112 specs); production deploy pending |
+| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against the production supergroups — hardening built and verified 2026-07-05 (112 specs); production deploy pending |
 
 Testing: RSpec on renderer/mapping with WebMock against the Bot API; manual
 E2E in dev via polling mode. Dev gotcha: changes to `plugin.rb`/Ruby require
@@ -252,4 +253,4 @@ a full Rails restart.
 | Core changes chat events/SDK signatures | Medium | Small code surface; only official hooks; `.discourse-compatibility`; plugin lives in its own repo so hotfixes are easy |
 | Rate limits in busy channels | Medium | Backoff + per-channel queue; the POC is low-traffic (staff) |
 | Formatting fidelity eaten by edge cases | High (but low harm) | Degrade to plain text; grow the converter iteratively |
-| SFW/NSFW mapping mistake | Low | Boot log + manual review |
+| Channel mapped into the wrong group | Low | Boot log + manual review |
