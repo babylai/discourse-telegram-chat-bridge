@@ -1,6 +1,6 @@
 # Discourse Chat ↔ Telegram bridge — design & plan
 
-*Status: in development. POC target: staff/admin channels.*
+*Status: in production.*
 
 ## 1. Purpose and decisions
 
@@ -15,7 +15,7 @@ Decisions made 2026-07-05:
 | Identity T→D | **A single bot user** in Discourse; Telegram messages are posted as `**Maria:** text`. |
 | Identity D→T | The Telegram bot posts the author as **real bold text** via Telegram's `parse_mode: HTML` (`<b>nicolai:</b> text`), not literal markdown asterisks (bots cannot impersonate users). |
 | Scope | Text both ways, **edits both ways**, **deletions D→T only** (the Bot API has no deletion event), **images/files both ways**, **replies/quotes both ways**. |
-| First deliverable | A POC bridging the staff channels to Telegram topics. |
+| First deliverable | Bridging the staff channels to Telegram topics. |
 
 Plugin name: **`discourse-telegram-chat-bridge`**. Deployed to production
 via a `git clone` line in the site's container config (`app.yml`), like any
@@ -55,8 +55,8 @@ other Discourse plugin.
 - **Topics:** In a supergroup with Topics, every message carries a
   `message_thread_id`; messages in "General" have none. Sending into a topic
   means setting `message_thread_id` on sendMessage. The bot can create topics
-  (`createForumTopic`, requires admin with `can_manage_topics`) — not needed
-  in the POC, where the mapping is manual.
+  (`createForumTopic`, requires admin with `can_manage_topics`) — not needed,
+  since the mapping is manual.
 - **Hard limitations:**
   - Bots cannot set a per-message name/avatar → the name-prefix convention.
   - **No deletion event** → deletions cannot be synced T→D.
@@ -107,7 +107,7 @@ Discourse (production container)
 All Telegram I/O happens in Sidekiq jobs (never in the request cycle), with
 retries and respect for `retry_after` on HTTP 429.
 
-### Configuration (site settings, POC)
+### Configuration (site settings)
 
 | Setting | Type | Contents |
 |---|---|---|
@@ -192,10 +192,10 @@ This table drives replies (look up the counterpart id), edits and deletions.
 Telegram topics are long-lived "rooms" inside one supergroup and therefore
 map to **Discourse chat channels 1:1** — that's the core idea of the
 mapping. They deliberately do *not* map to Discourse chat threads (which are
-ephemeral and created per message); in the POC, thread replies are bridged
-flat as a reply to the thread's root message.
+ephemeral and created per message); thread replies are bridged flat as a
+reply to the thread's root message.
 
-Practical POC helper: the bot replies to the `/id` command in a topic with
+Practical setup helper: the bot replies to the `/id` command in a topic with
 the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 
 ## 5. Edge cases and known limitations
@@ -203,8 +203,7 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 - **Deletion in Telegram** never reaches Discourse (no Bot API event).
   Accepted.
 - **Edit window:** Telegram only allows editing bot messages for 48 hours;
-  older Discourse edits get an "(edited: …)" follow-up message or are
-  ignored (POC: ignore + log).
+  older Discourse edits are not reflected on the Telegram side.
 - **Reactions** are out of scope (can be added later; Bot API ≥ 7.0 supports
   reaction updates).
 - **Rate limits:** a burst in a busy channel can hit 20/min per group → jobs
@@ -231,7 +230,7 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 - Uploads are bridged as bytes; no internal URLs (which would require login
   anyway) are leaked.
 
-## 7. POC plan (milestones)
+## 7. Milestones
 
 | # | Milestone | Contents | Acceptance criterion |
 |---|---|---|---|
@@ -240,7 +239,7 @@ the `chat_id` + `message_thread_id`, making mapping rows easy to look up.
 | M2 ✅ | T→D text | Webhook route, secret validation, ChatSDK, entities→markdown | A Telegram message lands in the channel as `**Name:** text` in real time — **live-verified 2026-07-05** with a real `setWebhook` against the test site |
 | M3 ✅ | Replies, edits, deletion (D→T) | Full use of the mapping table | Edit/delete/reply reflected correctly — **live-verified both directions 2026-07-05**. Gotcha: `allowed_updates` is baked into the setWebhook registration, so adding `edited_message` in code required re-running setWebhook |
 | M4 ✅ | Media | Images/files both ways, albums, size limits | Photos both ways; oversized files degrade gracefully — 99 specs green; **live-verified both directions 2026-07-05** (photo D→T, photo+caption T→D, reply-with-image D→T, caption edit T→D) |
-| M5 | Hardening + production POC | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Staff channels running against the production supergroups — hardening built and verified 2026-07-05 (112 specs); production deploy pending |
+| M5 ✅ | Hardening + production deploy | 429 backoff, `/id` command, boot log of mappings, README; production deploy | Hardening verified 2026-07-05 (112 specs); **live in production since 2026-07-06** |
 
 Testing: RSpec on renderer/mapping with WebMock against the Bot API; manual
 E2E in dev via polling mode. Dev gotcha: changes to `plugin.rb`/Ruby require
@@ -251,6 +250,6 @@ a full Rails restart.
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Core changes chat events/SDK signatures | Medium | Small code surface; only official hooks; `.discourse-compatibility`; plugin lives in its own repo so hotfixes are easy |
-| Rate limits in busy channels | Medium | Backoff + per-channel queue; the POC is low-traffic (staff) |
+| Rate limits in busy channels | Medium | Backoff + per-channel queue; the bridged channels are low-traffic (staff) |
 | Formatting fidelity eaten by edge cases | High (but low harm) | Degrade to plain text; grow the converter iteratively |
 | Channel mapped into the wrong group | Low | Boot log + manual review |
