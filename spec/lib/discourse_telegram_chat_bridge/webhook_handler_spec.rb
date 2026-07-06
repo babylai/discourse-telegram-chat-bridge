@@ -327,6 +327,37 @@ describe DiscourseTelegramChatBridge::WebhookHandler do
       expect(get_file_stub).not_to have_been_requested
     end
 
+    it "keeps the attached photo when the caption is edited (regression)" do
+      stub_photo_download
+      described_class.handle_update(build_media_update(caption: "first caption", **photo_field))
+      message = Chat::Message.where(chat_channel_id: channel.id).last
+      expect(message.uploads.count).to eq(1)
+
+      described_class.handle_update(
+        {
+          "update_id" => 4,
+          "edited_message" => {
+            "message_id" => 700,
+            "date" => Time.zone.now.to_i,
+            "chat" => {
+              "id" => -1_001_111_111_111,
+            },
+            "message_thread_id" => 42,
+            "caption" => "edited caption",
+            "from" => {
+              "id" => 999,
+              "is_bot" => false,
+              "first_name" => "Maria",
+            },
+          },
+        },
+      )
+
+      message.reload
+      expect(message.message).to eq("**Maria:** edited caption")
+      expect(message.uploads.count).to eq(1)
+    end
+
     it "degrades to a note when Telegram refuses the download as too big" do
       stub_request(:post, %r{\Ahttps://api\.telegram\.org/bot.*/getFile\z}).to_return(
         status: 400,

@@ -112,9 +112,10 @@ module DiscourseTelegramChatBridge
       chat_message = Chat::Message.find_by(id: bridged.chat_message_id)
       return if chat_message.nil?
 
-      # No upload_ids passed - Chat::UpdateMessage leaves existing
-      # attachments untouched in that case, so a caption edit keeps the
-      # bridged file.
+      # The current upload ids MUST be passed back explicitly: with blank
+      # upload_ids, Chat::UpdateMessage resolves them to an empty list and
+      # strips the message's attachments - a caption edit would silently
+      # remove the bridged photo (seen in production 2026-07-06).
       result =
         Chat::UpdateMessage.call(
           guardian: Guardian.new(BotUser.ensure!),
@@ -122,6 +123,7 @@ module DiscourseTelegramChatBridge
             message_id: chat_message.id,
             channel_id: chat_message.chat_channel_id,
             message: build_raw(message, body: body),
+            upload_ids: chat_message.upload_ids,
           },
         )
 
