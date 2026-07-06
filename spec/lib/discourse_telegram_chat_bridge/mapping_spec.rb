@@ -37,6 +37,14 @@ describe DiscourseTelegramChatBridge::Mapping do
 
       expect(described_class.entries.size).to eq(1)
     end
+
+    it "skips a swapped-fields line and warns about it" do
+      allow(Rails.logger).to receive(:warn)
+      SiteSetting.telegram_bridge_mappings = "-1001265556713:12989:"
+
+      expect(described_class.entries).to eq([])
+      expect(Rails.logger).to have_received(:warn).with(/swapped/)
+    end
   end
 
   describe ".parse!" do
@@ -57,6 +65,27 @@ describe DiscourseTelegramChatBridge::Mapping do
         DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
       )
       expect { described_class.parse!("5:-100:abc") }.to raise_error(
+        DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
+      )
+    end
+
+    it "rejects swapped fields (the production incident line)" do
+      # A Telegram supergroup id in the first field can only mean the
+      # format was misread as telegram_chat_id:chat_channel_id.
+      expect { described_class.parse!("-1001265556713:12989:") }.to raise_error(
+        DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
+        /swapped/,
+      )
+    end
+
+    it "rejects non-positive chat_channel_id and telegram_thread_id" do
+      expect { described_class.parse!("0:-100") }.to raise_error(
+        DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
+      )
+      expect { described_class.parse!("5:-100:0") }.to raise_error(
+        DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
+      )
+      expect { described_class.parse!("5:-100:-42") }.to raise_error(
         DiscourseTelegramChatBridge::Mapping::InvalidEntryError,
       )
     end

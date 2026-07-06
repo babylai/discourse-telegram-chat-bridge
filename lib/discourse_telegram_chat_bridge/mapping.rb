@@ -77,15 +77,21 @@ module DiscourseTelegramChatBridge
 
       chat_channel_id, telegram_chat_id, telegram_thread_id = fields
 
-      if !integer_string?(chat_channel_id)
-        raise InvalidEntryError, "invalid chat_channel_id in mapping line: #{line.inspect}"
+      # Discourse channel ids are always positive; Telegram supergroup ids
+      # are negative. A negative first field means the fields are swapped -
+      # a real misconfiguration seen in the wild.
+      if !positive_integer_string?(chat_channel_id)
+        raise InvalidEntryError,
+              "invalid chat_channel_id in mapping line (must be a positive Discourse channel " \
+                "id - a negative value usually means the fields are swapped, the format is " \
+                "chat_channel_id:telegram_chat_id:telegram_thread_id): #{line.inspect}"
       end
 
       if !integer_string?(telegram_chat_id)
         raise InvalidEntryError, "invalid telegram_chat_id in mapping line: #{line.inspect}"
       end
 
-      if telegram_thread_id.present? && !integer_string?(telegram_thread_id)
+      if telegram_thread_id.present? && !positive_integer_string?(telegram_thread_id)
         raise InvalidEntryError, "invalid telegram_thread_id in mapping line: #{line.inspect}"
       end
 
@@ -100,5 +106,10 @@ module DiscourseTelegramChatBridge
       value.to_s.match?(/\A-?\d+\z/)
     end
     private_class_method :integer_string?
+
+    def self.positive_integer_string?(value)
+      value.to_s.match?(/\A\d+\z/) && value.to_i.positive?
+    end
+    private_class_method :positive_integer_string?
   end
 end
