@@ -44,7 +44,7 @@ module DiscourseTelegramChatBridge
 
       # A long, formatted message risks a split landing mid-tag and
       # breaking Telegram's HTML parser entirely - degrade to plain text.
-      plain = "#{@prefix}: #{fragment.text.strip}"
+      plain = "#{@prefix}: #{plain_text}"
       plain.scan(/.{1,#{MAX_MESSAGE_LENGTH}}/m)
     end
 
@@ -69,6 +69,10 @@ module DiscourseTelegramChatBridge
         "\n"
       when "p", "div", "li"
         "#{inner}\n"
+      when "img"
+        # Discourse cooks emojis into <img class="emoji"> tags - without
+        # this they'd render as nothing on the Telegram side.
+        node["class"].to_s.split.include?("emoji") ? escape(emoji_unicode(node)) : ""
       when "a"
         href = node["href"]
         href.present? ? %(<a href="#{escape(href)}">#{inner}</a>) : inner
@@ -82,6 +86,23 @@ module DiscourseTelegramChatBridge
 
     def escape(text)
       CGI.escapeHTML(text.to_s)
+    end
+
+    # ":joy:" -> 😂, ":+1:t2:" -> 👍🏻; custom emojis have no unicode and
+    # fall back to their ":shortcode:" text.
+    def emoji_unicode(node)
+      name = node["title"].to_s.sub(/\A:/, "").sub(/:\z/, "")
+      ::Emoji.lookup_unicode(name).presence || node["title"].to_s
+    end
+
+    # Plain-text rendering for the long-message fallback, with emoji imgs
+    # substituted first so they survive .text extraction.
+    def plain_text
+      doc = fragment
+      doc.css("img.emoji").each do |img|
+        img.replace(Nokogiri::XML::Text.new(emoji_unicode(img), img.document))
+      end
+      doc.text.strip
     end
   end
 end

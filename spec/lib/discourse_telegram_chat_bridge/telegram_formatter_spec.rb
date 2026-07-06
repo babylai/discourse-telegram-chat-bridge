@@ -41,6 +41,48 @@ describe DiscourseTelegramChatBridge::TelegramFormatter do
     )
   end
 
+  it "converts cooked emoji imgs to their unicode character" do
+    cooked =
+      '<p>ha <img src="/images/emoji/twitter/joy.png?v=12" title=":joy:" class="emoji" alt=":joy:"></p>'
+
+    expect(format(cooked)).to eq(["<b>maria:</b> ha 😂"])
+  end
+
+  it "handles an emoji-only message (the only-emoji case)" do
+    cooked =
+      '<p><img src="/images/emoji/twitter/joy.png?v=12" title=":joy:" class="emoji only-emoji" alt=":joy:"></p>'
+
+    expect(format(cooked)).to eq(["<b>maria:</b> 😂"])
+  end
+
+  it "converts skin-tone emoji variants" do
+    cooked =
+      '<p><img src="/images/emoji/twitter/+1/2.png?v=12" title=":+1:t2:" class="emoji" alt=":+1:t2:"></p>'
+
+    expect(format(cooked)).to eq(["<b>maria:</b> #{Emoji.lookup_unicode("+1:t2")}"])
+  end
+
+  it "falls back to the shortcode for custom emojis without a unicode equivalent" do
+    cooked =
+      '<p><img src="/uploads/default/original/1X/blob.png" title=":blobwave:" class="emoji emoji-custom" alt=":blobwave:"></p>'
+
+    expect(format(cooked)).to eq(["<b>maria:</b> :blobwave:"])
+  end
+
+  it "still drops non-emoji images" do
+    expect(format('<p>look <img src="/uploads/x.png" alt="a picture"></p>')).to eq(
+      ["<b>maria:</b> look"],
+    )
+  end
+
+  it "keeps emojis in the plain-text long-message fallback" do
+    long_word = "a" * 5000
+    cooked =
+      "<p>#{long_word} <img src=\"/images/emoji/twitter/joy.png?v=12\" title=\":joy:\" class=\"emoji\" alt=\":joy:\"></p>"
+
+    expect(format(cooked).join).to include("😂")
+  end
+
   it "degrades to plain-text chunks instead of risking malformed HTML when too long" do
     long_word = "a" * 5000
     result = format("<p><strong>#{long_word}</strong></p>")
